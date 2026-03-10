@@ -13,7 +13,7 @@ class DiffusionInpaintPolicy(nn.Module):
         image_channels: int = 3,
         mask_channels: int = 1,
         bilinear: bool = False,
-        timesteps: int = 100,
+        timesteps: int = 1000,
         beta_start: float = 1e-4,
         beta_end: float = 2e-2,
     ):
@@ -90,14 +90,6 @@ class DiffusionInpaintPolicy(nn.Module):
         xt = sqrt_alpha_bar_t * x0 + sqrt_one_minus_alpha_bar_t * noise
         return xt, noise
 
-    def get_target(self, x0, noise):
-        if self.pred_type == "x0":
-            return x0
-        elif self.pred_type == "eps":
-            return noise
-        else:
-            raise ValueError(f"Unsupported pred_type: {self.pred_type}")
-
     def _to_imagenet_input(self, x):
         """ Convert image from [-1, 1] to ImageNet-normalized input """
         x = (x + 1.0) / 2.0
@@ -117,7 +109,6 @@ class DiffusionInpaintPolicy(nn.Module):
         xt, noise = self.q_sample(x0, t)
 
         pred = self.forward(xt, masked_image, mask)
-        target = self.get_target(x0, noise)
 
         if self.pred_type == "x0":
             pred_img = pred
@@ -211,41 +202,3 @@ class DiffusionInpaintPolicy(nn.Module):
         if return_trajectory:
             return final_x0, trajectory
         return final_x0
-
-    @torch.no_grad()
-    def predict_eps(self, masked_image, mask, xT=None, return_x0=False):
-        """
-        Full iterative reverse diffusion process and return final epsilon prediction.
-
-        Args:
-            masked_image: [B, 3, H, W]
-            mask:         [B, 1, H, W]
-            xT:           optional initial noise
-            return_x0:    if True, also return final reconstructed image
-
-        Returns:
-            final_eps
-            or (final_eps, final_x0)
-        """
-        device = masked_image.device
-        b, c, h, w = masked_image.shape
-
-        if xT is None:
-            xt = torch.randn((b, c, h, w), device=device)
-        else:
-            xt = xT.to(device)
-
-        xt = masked_image + mask * xt
-
-        final_eps = None
-
-        for step in reversed(range(self.timesteps)):
-            t = torch.full((b,), step, device=device, dtype=torch.long)
-            xt, _, eps_pred = self.p_sample_step(xt, masked_image, mask, t)
-            final_eps = eps_pred
-
-        final_x0 = xt
-
-        if return_x0:
-            return final_eps, final_x0
-        return final_eps
