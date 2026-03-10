@@ -13,7 +13,7 @@ class DiffusionInpaintPolicy(nn.Module):
         image_channels: int = 3,
         mask_channels: int = 1,
         bilinear: bool = False,
-        timesteps: int = 1000,
+        timesteps: int = 100,
         beta_start: float = 1e-4,
         beta_end: float = 2e-2,
     ):
@@ -128,7 +128,8 @@ class DiffusionInpaintPolicy(nn.Module):
             mask_expand = mask.expand_as(pred)
             eps_loss = ((pred - noise) ** 2 * mask_expand).sum() / (mask_expand.sum() + 1e-8)
             recon_loss = (torch.abs(pred_img - x0) * mask_expand).sum() / (mask_expand.sum() + 1e-8)
-            l1 = eps_loss + 0.5 * recon_loss         # name it l1 loss for code clean
+            # l1 = eps_loss + 0.5 * recon_loss         # name it l1 loss for code clean
+            l1 = eps_loss
             # perceptual loss
             perc = torch.tensor(0.0, device=x0.device)
         else:
@@ -172,6 +173,8 @@ class DiffusionInpaintPolicy(nn.Module):
         )
 
         noise = torch.randn_like(xt)
+        # try to use no noise added
+        noise = torch.zeros_like(xt)
         nonzero_mask = (t > 0).float().view(b, 1, 1, 1)
         xt_prev = mean + nonzero_mask * torch.sqrt(beta_t) * noise
 

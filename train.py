@@ -220,8 +220,8 @@ def main(args):
     }
 
     print("Loading data...")
-    train_dataset_path = os.path.join(args["cached_dir"], "train.pt")
-    test_dataset_path = os.path.join(args["cached_dir"], "test.pt")
+    train_dataset_path = os.path.join(args["cached_dir"], "train-32.pt")
+    test_dataset_path = os.path.join(args["cached_dir"], "test-32.pt")
     if os.path.exists(train_dataset_path) and os.path.exists(test_dataset_path):
         print("Loading data from pre processed .pt file")
         train_dataset = InpaintingTensorDataset(train_dataset_path)
@@ -247,7 +247,7 @@ def main(args):
         print(f"Evaluation completed: PSNR={float(psnr_score):.4f}, SSIM={float(ssim_score):.4f}, LPIPS={float(lpips_score)}")
         return
 
-    best_epoch, epoch_losses = train(config, test_loader)
+    best_epoch, epoch_losses = train(config, train_loader)
     print(
         f"Training finished: "
         f"last total loss {epoch_losses['total'][-1]:.6f}, "
@@ -263,15 +263,15 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--lr", type=float, default=5e-5)
+    parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--num_epochs", type=int, default=200)
+    parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--split_ratio", type=float, default=0.9)
     parser.add_argument("--save_per_epoch", type=int, default=10)
 
     parser.add_argument("--img_size", type=int, default=128)
     parser.add_argument("--mask_size", type=int, default=64)
-    parser.add_argument("--timesteps", type=int, default=1000)
+    parser.add_argument("--timesteps", type=int, default=100)
     parser.add_argument("--pred_type", type=str, default="x0", choices=["x0", "eps"])
     parser.add_argument("--perceptual_weight", type=float, default=0.05)
 

@@ -226,45 +226,56 @@ def build_and_save_pt_dataset(
 
 
 
+def rewrite_dataset_and_save(original_path, output_path, mask_size=32, seed=42):
+    original_dataset = torch.load(original_path)
+    img_size = original_dataset["images"].shape[2]
+    generator = torch.Generator().manual_seed(seed)
+
+    images = []
+    masks = []
+    masked_images = []
+    for img in original_dataset["images"]:
+        # generate mask
+        mask = torch.zeros((1, img_size, img_size))
+        top = torch.randint(0, img_size - mask_size + 1, (1,), generator=generator).item()
+        left = torch.randint(0, img_size - mask_size + 1, (1,), generator=generator).item()
+        mask[:, top:top+mask_size, left:left+mask_size] = 1.0
+        masked_image = img * (1 - mask)
+
+        images.append(img)
+        masks.append(mask)
+        masked_images.append(masked_image)
+
+    images = torch.stack(images)
+    masks = torch.stack(masks)
+    masked_images = torch.stack(masked_images)
+
+    new_data = {
+        "images": images,
+        "masks": masks,
+        "masked_images": masked_images
+    }
+
+    torch.save(new_data, output_path)
+    print("Dataset Converted.", "Image shape:", images.shape)
+
+
 if __name__ == "__main__":
-    # train_loader, val_loader = get_dataloader(
-    #     root_dir="/home/ycb410/ycb_ws/Diffusion_Inpainting/datasets",
-    #     batch_size=4,
-    #     img_size=256,
+    
+    # build_and_save_pt_dataset(
+    #     root_dir="./datasets/images",
+    #     output_dir="./datasets/cached",
+    #     img_size=128,
     #     mask_size=64,
-    #     split_ratio=0.9,
     # )
+    rewrite_dataset_and_save(
+        original_path="./datasets/cached/train.pt",
+        output_path="./datasets/cached/train-32.pt",
+        mask_size=32
+    )
 
-    # batch = next(iter(train_loader))
-
-    # images = batch["image"]
-    # masks = batch["mask"]
-    # masked_images = batch["masked_image"]
-
-    # def denorm(x):
-    #     return (x * 0.5 + 0.5).clamp(0, 1)
-
-    # fig, axes = plt.subplots(4, 3, figsize=(9, 12))
-    # for i in range(4):
-    #     img = denorm(images[i]).permute(1, 2, 0).cpu().numpy()
-    #     msk = masks[i, 0].cpu().numpy()
-    #     mimg = denorm(masked_images[i]).permute(1, 2, 0).cpu().numpy()
-
-    #     axes[i, 0].imshow(img)
-    #     axes[i, 0].set_title("image")
-    #     axes[i, 1].imshow(msk, cmap="gray")
-    #     axes[i, 1].set_title("mask")
-    #     axes[i, 2].imshow(mimg)
-    #     axes[i, 2].set_title("masked_image")
-
-    #     for j in range(3):
-    #         axes[i, j].axis("off")
-
-    # plt.tight_layout()
-    # plt.show()
-    build_and_save_pt_dataset(
-        root_dir="./datasets/images",
-        output_dir="./datasets/cached",
-        img_size=128,
-        mask_size=64,
+    rewrite_dataset_and_save(
+        original_path="./datasets/cached/test.pt",
+        output_path="./datasets/cached/test-32.pt",
+        mask_size=32
     )
