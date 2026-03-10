@@ -227,7 +227,7 @@ def main(args):
         train_dataset = InpaintingTensorDataset(train_dataset_path)
         test_dataset = InpaintingTensorDataset(test_dataset_path)
         train_loader = DataLoader(train_dataset, batch_size=args["batch_size"], shuffle=True, num_workers=0, pin_memory=True)
-        test_loader = DataLoader(test_dataset, batch_size=args["batch_size"], shuffle=True, num_workers=0, pin_memory=True)
+        test_loader = DataLoader(test_dataset, batch_size=args["batch_size"], shuffle=False, num_workers=0, pin_memory=True)
     else:
         print("Loading data from original file")
         train_loader, test_loader = get_dataloader(
@@ -247,7 +247,7 @@ def main(args):
         print(f"Evaluation completed: PSNR={float(psnr_score):.4f}, SSIM={float(ssim_score):.4f}, LPIPS={float(lpips_score)}")
         return
 
-    best_epoch, epoch_losses = train(config, train_loader)
+    best_epoch, epoch_losses = train(config, test_loader)
     print(
         f"Training finished: "
         f"last total loss {epoch_losses['total'][-1]:.6f}, "
@@ -263,9 +263,9 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--num_epochs", type=int, default=100)
+    parser.add_argument("--num_epochs", type=int, default=200)
     parser.add_argument("--split_ratio", type=float, default=0.9)
     parser.add_argument("--save_per_epoch", type=int, default=10)
 

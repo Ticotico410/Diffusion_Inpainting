@@ -62,10 +62,12 @@ class DiffusionInpaintPolicy(nn.Module):
             torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(1, 3, 1, 1)
         )
 
-    def forward(self, xt, masked_image, mask):
+
+    def forward(self, xt, masked_image, mask, t):
         x = torch.cat([xt, masked_image, mask], dim=1)
-        pred = self.model(x)
+        pred = self.model(x, t)
         return pred
+    
 
     def extract(self, a, t, x_shape):
         """ Extract a[t] and reshape to [B, 1, 1, 1] for broadcasting """
@@ -107,34 +109,47 @@ class DiffusionInpaintPolicy(nn.Module):
 
         t = self.sample_timesteps(b, device)
         xt, noise = self.q_sample(x0, t)
+        xt = x0 * (1 - mask) + mask * xt
 
-        pred = self.forward(xt, masked_image, mask)
+        pred = self.forward(xt, masked_image, mask, t)
 
         if self.pred_type == "x0":
             pred_img = pred
+            # l1 loss
+            diff = torch.abs(pred_img - x0) * mask
+            l1 = diff.sum() / (mask.sum() * x0.shape[1] + 1e-8)
+            # perceptual loss
+            perc = self.perceptual_loss(pred_img, x0)
         elif self.pred_type == "eps":
             alpha_bar_t = self.extract(self.alpha_bars, t, xt.shape)
             pred_img = (xt - torch.sqrt(1.0 - alpha_bar_t) * pred) / torch.sqrt(alpha_bar_t)
+            pred_img = pred_img.clamp(-1.0, 1.0)
+            # directly use mse loss of noise
+            mask_expand = mask.expand_as(pred)
+            eps_loss = ((pred - noise) ** 2 * mask_expand).sum() / (mask_expand.sum() + 1e-8)
+            recon_loss = (torch.abs(pred_img - x0) * mask_expand).sum() / (mask_expand.sum() + 1e-8)
+            l1 = eps_loss + 0.5 * recon_loss         # name it l1 loss for code clean
+            # perceptual loss
+            perc = torch.tensor(0.0, device=x0.device)
         else:
             raise ValueError(f"Unsupported pred_type: {self.pred_type}")
-
-        l1 = F.l1_loss(pred_img, x0)
-        perc = self.perceptual_loss(pred_img, x0)
 
         return {"l1": l1, "perc": perc}
 
     def model_predict(self, xt, masked_image, mask, t):
         """ Model prediction """
-        pred = self.forward(xt, masked_image, mask)
+        pred = self.forward(xt, masked_image, mask, t)
 
         alpha_bar_t = self.extract(self.alpha_bars, t, xt.shape)
 
         if self.pred_type == "x0":
             x0_pred = pred
             eps_pred = (xt - torch.sqrt(alpha_bar_t) * x0_pred) / torch.sqrt(1.0 - alpha_bar_t)
+            x0_pred = x0_pred.clamp(-1.0, 1.0)
         elif self.pred_type == "eps":
             eps_pred = pred
             x0_pred = (xt - torch.sqrt(1.0 - alpha_bar_t) * eps_pred) / torch.sqrt(alpha_bar_t)
+            x0_pred = x0_pred.clamp(-1.0, 1.0)
         else:
             raise ValueError(f"Unsupported pred_type: {self.pred_type}")
 
@@ -198,6 +213,7 @@ class DiffusionInpaintPolicy(nn.Module):
                 trajectory.append(x0_pred.detach().cpu())
 
         final_x0 = xt
+        final_x0 = final_x0.clamp(-1.0, 1.0)
 
         if return_trajectory:
             return final_x0, trajectory
