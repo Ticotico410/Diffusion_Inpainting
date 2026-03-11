@@ -128,10 +128,10 @@ class DiffusionInpaintPolicy(nn.Module):
             mask_expand = mask.expand_as(pred)
             eps_loss = ((pred - noise) ** 2 * mask_expand).sum() / (mask_expand.sum() + 1e-8)
             recon_loss = (torch.abs(pred_img - x0) * mask_expand).sum() / (mask_expand.sum() + 1e-8)
-            # l1 = eps_loss + 0.5 * recon_loss         # name it l1 loss for code clean
-            l1 = eps_loss
+            l1 = eps_loss + 0.5 * recon_loss         # name it l1 loss for code clean
             # perceptual loss
-            perc = torch.tensor(0.0, device=x0.device)
+            # perc = torch.tensor(0.0, device=x0.device)
+            perc = self.perceptual_loss(pred_img, x0)
         else:
             raise ValueError(f"Unsupported pred_type: {self.pred_type}")
 
@@ -174,7 +174,7 @@ class DiffusionInpaintPolicy(nn.Module):
 
         noise = torch.randn_like(xt)
         # try to use no noise added
-        noise = torch.zeros_like(xt)
+        # noise = torch.zeros_like(xt)
         nonzero_mask = (t > 0).float().view(b, 1, 1, 1)
         xt_prev = mean + nonzero_mask * torch.sqrt(beta_t) * noise
 

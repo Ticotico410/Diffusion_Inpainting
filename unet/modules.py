@@ -19,11 +19,11 @@ class DoubleConv(nn.Module):
         self.double_conv = nn.Sequential(
             nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1),
             nn.GroupNorm(g1, mid_channels),
-            nn.SiLU(inplace=True),
+            nn.SiLU(),
 
             nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1),
             nn.GroupNorm(g2, out_channels),
-            nn.SiLU(inplace=True),
+            nn.SiLU(),
         )
 
         self.time_proj = nn.Sequential(
@@ -39,13 +39,50 @@ class DoubleConv(nn.Module):
             x = x + t_out
 
         return x
+    
+
+class ResBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, time_dim=256, num_groups=32):
+        super().__init__()
+
+        g1 = min(num_groups, in_channels)
+        g2 = min(num_groups, out_channels)
+
+        self.norm1 = nn.GroupNorm(g1, in_channels)
+        self.act1 = nn.SiLU()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+
+        self.time_proj = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(time_dim, out_channels)
+        )
+
+        self.norm2 = nn.GroupNorm(g2, out_channels)
+        self.act2 = nn.SiLU()
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+
+        if in_channels != out_channels:
+            self.skip = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+        else:
+            self.skip = nn.Identity()
+
+    def forward(self, x, t_emb=None):
+        h = self.conv1(self.act1(self.norm1(x)))
+
+        if t_emb is not None:
+            t_out = self.time_proj(t_emb).unsqueeze(-1).unsqueeze(-1)   # [B, C, 1, 1]
+            h = h + t_out
+
+        h = self.conv2(self.act2(self.norm2(h)))
+
+        return h + self.skip(x)
 
     
 class Down(nn.Module):
     def __init__(self, in_channels, out_channels, time_dim=256):
         super().__init__()
         self.maxpool = nn.MaxPool2d(2)
-        self.conv = DoubleConv(in_channels, out_channels, time_dim=time_dim)
+        self.conv = ResBlock(in_channels, out_channels, time_dim=time_dim)
 
     def forward(self, x, t_emb=None):
         x = self.maxpool(x)
@@ -62,7 +99,7 @@ class Up(nn.Module):
             self.conv = DoubleConv(in_channels, out_channels, in_channels // 2, time_dim=time_dim)
         else:
             self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
-            self.conv = DoubleConv(in_channels, out_channels, time_dim=time_dim)
+            self.conv = ResBlock(in_channels, out_channels, time_dim=time_dim)
 
     def forward(self, x1, x2, t_emb=None):
         x1 = self.up(x1)

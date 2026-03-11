@@ -131,15 +131,26 @@ class InpaintingTensorDataset(Dataset):
         self.images = data["images"]
         self.masks = data["masks"]
         self.masked_images = data["masked_images"]
+        self.mask_size = self.masks[0].shape[2]
 
     def __len__(self):
         return self.images.shape[0]
 
     def __getitem__(self, idx):
+        # generate different mask
+        img = self.images[idx]
+        img_size = img.shape[2]
+        mask_size = self.mask_size
+        mask = torch.zeros((1, img_size, img_size))
+        top = torch.randint(0, img_size - mask_size + 1, (1,)).item()
+        left = torch.randint(0, img_size - mask_size + 1, (1,)).item()
+        mask[:, top:top+mask_size, left:left+mask_size] = 1.0
+        masked_image = img * (1 - mask)
+
         return {
-            "image": self.images[idx],
-            "mask": self.masks[idx],
-            "masked_image": self.masked_images[idx],
+            "image": img,
+            "mask": mask,
+            "masked_image": masked_image,
         }
 
 

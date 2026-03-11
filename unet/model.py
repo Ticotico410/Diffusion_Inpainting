@@ -12,7 +12,7 @@ class UNet(nn.Module):
 
         self.time_mlp = TimeMLP(time_dim)
 
-        self.inc = DoubleConv(n_channels, 64, time_dim=time_dim)
+        self.inc = ResBlock(n_channels, 64, time_dim=time_dim)
         self.down1 = Down(64, 128, time_dim=time_dim)
         self.down2 = Down(128, 256, time_dim=time_dim)
         self.down3 = Down(256, 512, time_dim=time_dim)
