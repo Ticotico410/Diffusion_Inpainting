@@ -231,11 +231,11 @@ def main(args):
     else:
         print("Loading data from original file")
         train_loader, test_loader = get_dataloader(
-            root_dir=config["data_dir"],
+            train_dir=config["data_dir"],
+            test_dir="./datasets/testset",
             batch_size=config["batch_size"],
             img_size=config["img_size"],
             mask_size=config["mask_size"],
-            split_ratio=config["split_ratio"],
             num_workers=config["num_workers"],
         )
 
@@ -264,8 +264,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--lr", type=float, default=5e-5)
-    parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--num_epochs", type=int, default=100)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--num_epochs", type=int, default=300)
     parser.add_argument("--split_ratio", type=float, default=0.9)
     parser.add_argument("--save_per_epoch", type=int, default=10)
 

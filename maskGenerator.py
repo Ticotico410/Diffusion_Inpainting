@@ -29,6 +29,7 @@ class InpaintingDataset(Dataset):
         img_size: int = IMG_SIZE,
         mask_size: int = MASK_SIZE,
         normalize: bool = True,
+        train_set: bool = True,
     ):
         self.root_dir = Path(root_dir)
         self.img_size = img_size
@@ -41,10 +42,23 @@ class InpaintingDataset(Dataset):
         if len(self.image_paths) == 0:
             raise FileNotFoundError(f"No jpg/jpeg images found under: {self.root_dir}")
 
-        transform_list = [
-            transforms.Resize((img_size, img_size)),
-            transforms.ToTensor(),
-        ]
+        if train_set:
+            transform_list = [
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ColorJitter(
+                    brightness=0.1,
+                    contrast=0.1,
+                    saturation=0.1,
+                    hue=0.02
+                ),
+                transforms.Resize((img_size, img_size)),
+                transforms.ToTensor(),
+            ]
+        else:
+            transform_list = [
+                transforms.Resize((img_size, img_size)),
+                transforms.ToTensor(),
+            ]
 
         if normalize:
             transform_list.append(
@@ -81,44 +95,46 @@ class InpaintingDataset(Dataset):
 
 
 def get_dataloader(
-    root_dir,
+    train_dir,
+    test_dir,
     batch_size=64,
     img_size=256,
     mask_size=64,
-    split_ratio=0.7,
-    seed=42,
     num_workers=8,
     pin_memory=True,
     normalize=True,
 ):
-    dataset = InpaintingDataset(
-        root_dir=root_dir,
+    train_set = InpaintingDataset(
+        root_dir=train_dir,
         img_size=img_size,
         mask_size=mask_size,
         normalize=normalize,
     )
 
-    train_size = int(len(dataset) * split_ratio)
-    val_size = len(dataset) - train_size
-
-    generator = torch.Generator().manual_seed(seed)
-    train_ds, val_ds = random_split(dataset, [train_size, val_size], generator=generator)
+    test_set = InpaintingDataset(
+        root_dir=test_dir,
+        img_size=img_size,
+        mask_size=mask_size,
+        normalize=normalize,
+        train_set=False,
+    )
 
     train_loader = DataLoader(
-        train_ds,
+        train_set,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
         pin_memory=pin_memory,
         drop_last=True,
     )
+    
     val_loader = DataLoader(
-        val_ds,
+        test_set,
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        drop_last=False,
+        drop_last=False
     )
     return train_loader, val_loader
 
@@ -126,12 +142,12 @@ def get_dataloader(
 
 class InpaintingTensorDataset(Dataset):
 
-    def __init__(self, pt_path):
+    def __init__(self, pt_path, mask_size=32):
         data = torch.load(pt_path, map_location="cpu")
         self.images = data["images"]
         self.masks = data["masks"]
         self.masked_images = data["masked_images"]
-        self.mask_size = self.masks[0].shape[2]
+        self.mask_size = mask_size
 
     def __len__(self):
         return self.images.shape[0]

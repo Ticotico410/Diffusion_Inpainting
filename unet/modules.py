@@ -77,16 +77,48 @@ class ResBlock(nn.Module):
 
         return h + self.skip(x)
 
+
+class SelfAttention2d(nn.Module):
+    def __init__(self, channels, num_heads=4, num_groups=32):
+        super().__init__()
+        self.channels = channels
+        self.num_heads = num_heads
+
+        self.norm = nn.GroupNorm(min(num_groups, channels), channels)
+        self.attn = nn.MultiheadAttention(
+            embed_dim=channels,
+            num_heads=num_heads,
+            batch_first=True
+        )
+
+    def forward(self, x):
+        """
+        x: [B, C, H, W]
+        """
+        b, c, h, w = x.shape
+        x_in = x
+
+        x = self.norm(x)
+        # [B, C, H, W] -> [B, HW, C]
+        x = x.view(b, c, h * w).transpose(1, 2)
+        # self-attention
+        x, _ = self.attn(x, x, x)
+        # [B, HW, C] -> [B, C, H, W]
+        x = x.transpose(1, 2).view(b, c, h, w)
+        return x + x_in
+
     
 class Down(nn.Module):
     def __init__(self, in_channels, out_channels, time_dim=256):
         super().__init__()
         self.maxpool = nn.MaxPool2d(2)
-        self.conv = ResBlock(in_channels, out_channels, time_dim=time_dim)
+        self.block1 = ResBlock(in_channels, out_channels, time_dim=time_dim)
+        self.block2 = ResBlock(out_channels, out_channels, time_dim=time_dim)
 
     def forward(self, x, t_emb=None):
         x = self.maxpool(x)
-        x = self.conv(x, t_emb)
+        x = self.block1(x, t_emb)
+        x = self.block2(x, t_emb)
         return x
     
 
@@ -94,12 +126,15 @@ class Up(nn.Module):
     def __init__(self, in_channels, out_channels, bilinear=True, time_dim=256):
         super().__init__()
 
+        # not using bilinear
         if bilinear:
             self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
             self.conv = DoubleConv(in_channels, out_channels, in_channels // 2, time_dim=time_dim)
         else:
             self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
-            self.conv = ResBlock(in_channels, out_channels, time_dim=time_dim)
+        
+        self.block1 = ResBlock(in_channels, out_channels, time_dim=time_dim)
+        self.block2 = ResBlock(out_channels, out_channels, time_dim=time_dim)
 
     def forward(self, x1, x2, t_emb=None):
         x1 = self.up(x1)
@@ -111,7 +146,9 @@ class Up(nn.Module):
                         diffY // 2, diffY - diffY // 2])
 
         x = torch.cat([x2, x1], dim=1)
-        return self.conv(x, t_emb)
+        x = self.block1(x, t_emb)
+        x = self.block2(x, t_emb)
+        return x
 
 
 class OutConv(nn.Module):

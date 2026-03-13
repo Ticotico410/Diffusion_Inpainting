@@ -116,8 +116,9 @@ class DiffusionInpaintPolicy(nn.Module):
         if self.pred_type == "x0":
             pred_img = pred
             # l1 loss
-            diff = torch.abs(pred_img - x0) * mask
-            l1 = diff.sum() / (mask.sum() * x0.shape[1] + 1e-8)
+            # diff = torch.abs(pred_img - x0) * mask
+            # l1 = diff.sum() / (mask.sum() * x0.shape[1] + 1e-8)
+            l1 = F.l1_loss(pred_img, x0)
             # perceptual loss
             perc = self.perceptual_loss(pred_img, x0)
         elif self.pred_type == "eps":
