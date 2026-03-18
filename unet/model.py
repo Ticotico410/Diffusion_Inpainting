@@ -10,7 +10,8 @@ class UNet(nn.Module):
         self.bilinear = bilinear
         self.time_dim = time_dim
 
-        self.time_mlp = TimeMLP(time_dim)
+        if time_dim > 0:
+            self.time_mlp = TimeMLP(time_dim)
 
         self.inc1 = ResBlock(n_channels, 64, time_dim=time_dim)
         self.inc2 = ResBlock(64, 64, time_dim=time_dim)
@@ -37,8 +38,11 @@ class UNet(nn.Module):
         self.up4 = Up(128, 64, bilinear, time_dim=time_dim)
         self.outc = OutConv(64, n_classes)
 
-    def forward(self, x, t):
-        t_emb = self.time_mlp(t)   # [B, time_dim]
+    def forward(self, x, t=None):
+        if self.time_dim > 0:
+            t_emb = self.time_mlp(t)   # [B, time_dim]
+        else:
+            t_emb = None
 
         x1 = self.inc1(x, t_emb)
         x1 = self.inc2(x1, t_emb)

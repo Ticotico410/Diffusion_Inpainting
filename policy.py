@@ -78,13 +78,15 @@ class DiffusionInpaintPolicy(nn.Module):
     def sample_timesteps(self, batch_size, device):
         return torch.randint(0, self.timesteps, (batch_size,), device=device).long()
 
-    def q_sample(self, x0, t, noise=None):
+    def q_sample(self, x0, t, mask, noise=None):
         """
         Forward diffusion:
             x_t = sqrt(alpha_bar_t) * x_0 + sqrt(1 - alpha_bar_t) * eps
         """
         if noise is None:
             noise = torch.randn_like(x0)
+
+        noise = noise * mask
 
         sqrt_alpha_bar_t = self.extract(self.sqrt_alpha_bars, t, x0.shape)
         sqrt_one_minus_alpha_bar_t = self.extract(self.sqrt_one_minus_alpha_bars, t, x0.shape)
@@ -108,17 +110,16 @@ class DiffusionInpaintPolicy(nn.Module):
         device = x0.device
 
         t = self.sample_timesteps(b, device)
-        xt, noise = self.q_sample(x0, t)
-        xt = x0 * (1 - mask) + mask * xt
+        xt, noise = self.q_sample(x0, t, mask)
 
         pred = self.forward(xt, masked_image, mask, t)
 
         if self.pred_type == "x0":
             pred_img = pred
             # l1 loss
-            # diff = torch.abs(pred_img - x0) * mask
-            # l1 = diff.sum() / (mask.sum() * x0.shape[1] + 1e-8)
-            l1 = F.l1_loss(pred_img, x0)
+            diff = torch.abs(pred_img - x0) * mask
+            hole_loss = diff.sum() / (mask.sum() * x0.shape[1] + 1e-8)
+            l1 = F.l1_loss(pred_img, x0) + 6 * hole_loss
             # perceptual loss
             perc = self.perceptual_loss(pred_img, x0)
         elif self.pred_type == "eps":
@@ -129,7 +130,7 @@ class DiffusionInpaintPolicy(nn.Module):
             mask_expand = mask.expand_as(pred)
             eps_loss = ((pred - noise) ** 2 * mask_expand).sum() / (mask_expand.sum() + 1e-8)
             recon_loss = (torch.abs(pred_img - x0) * mask_expand).sum() / (mask_expand.sum() + 1e-8)
-            l1 = eps_loss + 0.5 * recon_loss         # name it l1 loss for code clean
+            l1 = 6 * eps_loss + recon_loss         # name it l1 loss for code clean
             # perceptual loss
             # perc = torch.tensor(0.0, device=x0.device)
             perc = self.perceptual_loss(pred_img, x0)
@@ -145,9 +146,8 @@ class DiffusionInpaintPolicy(nn.Module):
         alpha_bar_t = self.extract(self.alpha_bars, t, xt.shape)
 
         if self.pred_type == "x0":
-            x0_pred = pred
+            x0_pred = pred.clamp(-1.0, 1.0)
             eps_pred = (xt - torch.sqrt(alpha_bar_t) * x0_pred) / torch.sqrt(1.0 - alpha_bar_t)
-            x0_pred = x0_pred.clamp(-1.0, 1.0)
         elif self.pred_type == "eps":
             eps_pred = pred
             x0_pred = (xt - torch.sqrt(1.0 - alpha_bar_t) * eps_pred) / torch.sqrt(alpha_bar_t)
@@ -208,17 +208,82 @@ class DiffusionInpaintPolicy(nn.Module):
         xt = masked_image + mask * xt
 
         trajectory = []
+        input_image = []
 
         for step in reversed(range(self.timesteps)):
             t = torch.full((b,), step, device=device, dtype=torch.long)
             xt, x0_pred, _ = self.p_sample_step(xt, masked_image, mask, t)
 
             if return_trajectory:
-                trajectory.append(x0_pred.detach().cpu())
+                trajectory.append(x0_pred.clamp(-1.0, 1.0).detach().cpu())
+                input_image.append(xt.detach().cpu())
 
-        final_x0 = xt
+        final_x0 = masked_image + mask * x0_pred
         final_x0 = final_x0.clamp(-1.0, 1.0)
 
         if return_trajectory:
-            return final_x0, trajectory
+            return final_x0, trajectory, input_image
         return final_x0
+
+
+class DirectPredictPolicy(nn.Module):
+    def __init__(
+            self,
+            image_channels: int = 3,
+            mask_channels: int = 1,
+            bilinear: bool = False,
+        ):
+        super().__init__()
+        in_channels = image_channels + mask_channels
+        out_channels = image_channels
+        self.model = UNet(
+            n_channels=in_channels,
+            n_classes=out_channels,
+            bilinear=bilinear,
+            time_dim=0,
+        )
+
+        # perceptual network: VGG16 intermediate features
+        weights = models.VGG16_Weights.IMAGENET1K_V1
+        self.perceptual_net = models.vgg16(weights=weights).features[:16].eval()
+        for p in self.perceptual_net.parameters():
+            p.requires_grad = False
+        self.register_buffer(
+            "imagenet_mean",
+            torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(1, 3, 1, 1)
+        )
+        self.register_buffer(
+            "imagenet_std",
+            torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(1, 3, 1, 1)
+        )
+
+    def forward(self, masked_image, mask):
+        x = torch.cat([masked_image, mask], dim=1)
+        x0_pred = self.model(x)
+        return x0_pred
+    
+    def _to_imagenet_input(self, x):
+        """ Convert image from [-1, 1] to ImageNet-normalized input """
+        x = (x + 1.0) / 2.0
+        x = (x - self.imagenet_mean) / self.imagenet_std
+        return x
+    
+    def perceptual_loss(self, x_pred, x0):
+        x_pred_feat = self.perceptual_net(self._to_imagenet_input(x_pred))
+        x0_feat = self.perceptual_net(self._to_imagenet_input(x0))
+        return F.l1_loss(x_pred_feat, x0_feat)
+    
+    def compute_loss(self, masked_image, mask, x0):
+        x_pred = self.forward(masked_image, mask)
+        l1 = F.l1_loss(x_pred, x0)
+        # perceptual loss
+        perc = self.perceptual_loss(x_pred, x0)
+
+        return {"l1": l1, "perc": perc} 
+
+    @torch.no_grad()
+    def predict_x0(self, masked_image, mask, xT=None, return_trajectory=False):
+        x_pred = self.forward(masked_image, mask)
+
+        x_pred = mask * x_pred + masked_image * (1 - mask)
+        return x_pred

@@ -15,17 +15,23 @@ from ignite.metrics import FID, InceptionScore
 
 from utils import viz_loss, denorm, masked_psnr, masked_ssim, masked_lpips
 from maskGenerator import get_dataloader, InpaintingTensorDataset
-from policy import DiffusionInpaintPolicy
+from policy import DiffusionInpaintPolicy, DirectPredictPolicy
 
 
 def build_policy(config, device):
-    policy = DiffusionInpaintPolicy(
-        pred_type=config["pred_type"],
-        image_channels=3,
-        mask_channels=1,
-        bilinear=False,
-        timesteps=config["timesteps"],
-    ).to(device)
+    if config["policy_type"] == "diffusion":
+        policy = DiffusionInpaintPolicy(
+            pred_type=config["pred_type"],
+            image_channels=3,
+            mask_channels=1,
+            bilinear=False,
+            timesteps=config["timesteps"],
+        ).to(device)
+    elif config["policy_type"] == "direct":
+        policy = DirectPredictPolicy(image_channels=3, mask_channels=1, bilinear=False).to(device)
+    else:
+        raise NotImplementedError
+    
     return policy
 
 
@@ -161,6 +167,8 @@ def eval(config, test_loader):
     ssim_list = []
     lpips_list = []
 
+    traj = input_traj = None
+
     pbar = tqdm(test_loader, desc="Evaluating", unit="batch")
     for batch_idx, batch in enumerate(pbar):
         x0 = batch["image"].to(device, non_blocking=True)               # real image, [-1,1]
@@ -182,6 +190,10 @@ def eval(config, test_loader):
         lpips_list.append(lpips.item())
 
         if batch_idx == 0:
+            if config["policy_type"] == "diffusion":
+                x0_pred, traj, input_traj = policy.predict_x0(masked_image=masked_image, mask=mask, return_trajectory=True) 
+            else:
+                x0_pred = policy.predict_x0(masked_image=masked_image, mask=mask) 
             sample_real_list.append(real_imgs[:8].cpu())
             sample_fake_list.append(fake_imgs[:8].cpu())
 
@@ -192,6 +204,19 @@ def eval(config, test_loader):
     if sample_real_list and sample_fake_list:
         real_samples = torch.cat(sample_real_list, dim=0)
         fake_samples = torch.cat(sample_fake_list, dim=0)
+        traj_sample = []
+        input_traj_sample = []
+        
+        if traj and input_traj:
+            for i in traj:
+                traj_sample.append(denorm(i)[0].cpu())
+            for i in input_traj:
+                input_traj_sample.append(denorm(i)[0].cpu())
+            sample_traj = torch.stack(traj_sample, dim=0)
+            input_traj = torch.stack(input_traj_sample, dim=0)
+            save_image(sample_traj, "results_gen/sample_traj.png", nrow=10)
+            save_image(input_traj, "results_gen/input_traj.png", nrow=10)
+
         save_image(real_samples, "results_gen/real_sample.png", nrow=4)
         save_image(fake_samples, "results_gen/fake_sample.png", nrow=4)
         print("Saved samples: results_gen/real_sample.png, results_gen/fake_sample.png")
@@ -217,6 +242,7 @@ def main(args):
         "task_name": args["task_name"],
         "perceptual_weight": args["perceptual_weight"],
         "cached_dir": args["cached_dir"],
+        "policy_type": args["policy_type"],
     }
 
     print("Loading data...")
@@ -263,23 +289,24 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--lr", type=float, default=5e-5)
+    parser.add_argument("--lr", type=float, default=2e-5)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--num_epochs", type=int, default=300)
+    parser.add_argument("--num_epochs", type=int, default=500)
     parser.add_argument("--split_ratio", type=float, default=0.9)
-    parser.add_argument("--save_per_epoch", type=int, default=10)
+    parser.add_argument("--save_per_epoch", type=int, default=20)
 
     parser.add_argument("--img_size", type=int, default=128)
     parser.add_argument("--mask_size", type=int, default=64)
-    parser.add_argument("--timesteps", type=int, default=100)
+    parser.add_argument("--timesteps", type=int, default=500)
     parser.add_argument("--pred_type", type=str, default="x0", choices=["x0", "eps"])
     parser.add_argument("--perceptual_weight", type=float, default=0.05)
+    parser.add_argument("--policy_type", default="diffusion", choices=["diffusion", "direct"])
 
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--eval", action="store_true")
 
     parser.add_argument("--ckpt_name", type=str, default="best.pth")
-    parser.add_argument("--data_dir", type=str, default="./datasets/images")
+    parser.add_argument("--data_dir", type=str, default="./datasets/coast")
     parser.add_argument("--cached_dir", type=str, default="./datasets/cached")
     parser.add_argument("--ckpt_dir", type=str, default="./checkpoints")
     parser.add_argument("--task_name", type=str, default="diff-inpainting")
