@@ -16,6 +16,7 @@ class DiffusionInpaintPolicy(nn.Module):
         timesteps: int = 100,
         beta_start: float = 1e-4,
         beta_end: float = 2e-2,
+        no_skip: bool = False
     ):
         super().__init__()
 
@@ -34,6 +35,7 @@ class DiffusionInpaintPolicy(nn.Module):
             n_channels=in_channels,
             n_classes=out_channels,
             bilinear=bilinear,
+            no_skip=no_skip,
         )
 
         # diffusion schedule
@@ -232,6 +234,7 @@ class DirectPredictPolicy(nn.Module):
             image_channels: int = 3,
             mask_channels: int = 1,
             bilinear: bool = False,
+            no_skip: bool = False,
         ):
         super().__init__()
         in_channels = image_channels + mask_channels
@@ -241,6 +244,7 @@ class DirectPredictPolicy(nn.Module):
             n_classes=out_channels,
             bilinear=bilinear,
             time_dim=0,
+            no_skip=no_skip,
         )
 
         # perceptual network: VGG16 intermediate features

@@ -150,6 +150,25 @@ class Up(nn.Module):
         x = self.block2(x, t_emb)
         return x
 
+class UpNoSkip(nn.Module):
+    def __init__(self, in_channels, out_channels, bilinear=True, time_dim=256):
+        super().__init__()
+
+        if bilinear:
+            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        else:
+            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+
+        self.block1 = ResBlock(in_channels // 2, out_channels, time_dim=time_dim)
+        self.block2 = ResBlock(out_channels, out_channels, time_dim=time_dim)
+
+    def forward(self, x, t_emb=None):
+        x = self.up(x)
+
+        x = self.block1(x, t_emb)
+        x = self.block2(x, t_emb)
+        return x
+
 
 class OutConv(nn.Module):
     def __init__(self, in_channels, out_channels):

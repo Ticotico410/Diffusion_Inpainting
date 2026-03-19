@@ -3,7 +3,7 @@ from torch import nn
 
 
 class UNet(nn.Module):
-    def __init__(self, n_channels, n_classes, bilinear=False, time_dim=256):
+    def __init__(self, n_channels, n_classes, bilinear=False, time_dim=256, no_skip=False):
         super().__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
@@ -28,14 +28,26 @@ class UNet(nn.Module):
 
         self.mid_attn = SelfAttention2d(1024 // factor, num_heads=4)
 
-        self.up1 = Up(1024, 512 // factor, bilinear, time_dim=time_dim)
-        self.attn_up1 = SelfAttention2d(512 // factor, num_heads=4)
+        self.no_skip = no_skip
 
-        self.up2 = Up(512, 256 // factor, bilinear, time_dim=time_dim)
-        self.attn_up2 = SelfAttention2d(256 // factor, num_heads=4)
+        if no_skip:
+            self.up1 = UpNoSkip(1024, 512 // factor, bilinear, time_dim=time_dim)
+            self.attn_up1 = SelfAttention2d(512 // factor, num_heads=4)
 
-        self.up3 = Up(256, 128 // factor, bilinear, time_dim=time_dim)
-        self.up4 = Up(128, 64, bilinear, time_dim=time_dim)
+            self.up2 = UpNoSkip(512, 256 // factor, bilinear, time_dim=time_dim)
+            self.attn_up2 = SelfAttention2d(256 // factor, num_heads=4)
+
+            self.up3 = UpNoSkip(256, 128 // factor, bilinear, time_dim=time_dim)
+            self.up4 = UpNoSkip(128, 64, bilinear, time_dim=time_dim)
+        else:
+            self.up1 = Up(1024, 512 // factor, bilinear, time_dim=time_dim)
+            self.attn_up1 = SelfAttention2d(512 // factor, num_heads=4)
+
+            self.up2 = Up(512, 256 // factor, bilinear, time_dim=time_dim)
+            self.attn_up2 = SelfAttention2d(256 // factor, num_heads=4)
+
+            self.up3 = Up(256, 128 // factor, bilinear, time_dim=time_dim)
+            self.up4 = Up(128, 64, bilinear, time_dim=time_dim)
         self.outc = OutConv(64, n_classes)
 
     def forward(self, x, t=None):
@@ -58,14 +70,24 @@ class UNet(nn.Module):
 
         x5 = self.mid_attn(x5)
 
-        x = self.up1(x5, x4, t_emb)    # 16x16
-        x = self.attn_up1(x)
+        if self.no_skip:
+            x = self.up1(x5, t_emb)    # 16x16
+            x = self.attn_up1(x)
 
-        x = self.up2(x, x3, t_emb)     # 32x32
-        x = self.attn_up2(x)
+            x = self.up2(x, t_emb)     # 32x32
+            x = self.attn_up2(x)
 
-        x = self.up3(x, x2, t_emb)     # 64x64
-        x = self.up4(x, x1, t_emb)     # 128x128
+            x = self.up3(x, t_emb)     # 64x64
+            x = self.up4(x, t_emb)     # 128x128
+        else:
+            x = self.up1(x5, x4, t_emb)    # 16x16
+            x = self.attn_up1(x)
+
+            x = self.up2(x, x3, t_emb)     # 32x32
+            x = self.attn_up2(x)
+
+            x = self.up3(x, x2, t_emb)     # 64x64
+            x = self.up4(x, x1, t_emb)     # 128x128
 
         logits = self.outc(x)
         return logits
